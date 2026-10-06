@@ -6,6 +6,8 @@ import random
 import time
 import torch
 from os import path as osp
+from directory_setup import get_workdir
+from omegaconf import OmegaConf
 
 from basicsr.data import create_dataloader, create_dataset
 from basicsr.data.data_sampler import EnlargedSampler
@@ -30,9 +32,13 @@ def parse_options(is_train=True):
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument(
+    '--use_directory_setup',
+    action='store_true',
+    help='Use versioned directory setup for new experiments.')
     args = parser.parse_args()
     opt = parse(args.opt, is_train=is_train)
-
+    opt['use_directory_setup'] = args.use_directory_setup
     # distributed settings
     if args.launcher == 'none':
         opt['dist'] = False
@@ -127,6 +133,37 @@ def create_train_val_dataloader(opt, logger):
     return train_loader, train_sampler, val_loader, total_epochs, total_iters
 
 
+# def main():
+#     # parse options, set distributed setting, set ramdom seed
+#     opt = parse_options(is_train=True)
+
+#     torch.backends.cudnn.benchmark = True
+#     # torch.backends.cudnn.deterministic = True
+
+#     # automatic resume ..
+#     state_folder_path = 'experiments/{}/training_states/'.format(opt['name'])
+#     import os
+#     try:
+#         states = os.listdir(state_folder_path)
+#     except:
+#         states = []
+
+#     resume_state = None
+#     if len(states) > 0:
+#         max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
+#         resume_state = os.path.join(state_folder_path, max_state_file)
+#         opt['path']['resume_state'] = resume_state
+
+#     # load resume states if necessary
+#     if opt['path'].get('resume_state'):
+#         device_id = torch.cuda.current_device()
+#         resume_state = torch.load(
+#             opt['path']['resume_state'],
+#             map_location=lambda storage, loc: storage.cuda(device_id))
+#     else:
+#         resume_state = None
+
+
 def main():
     # parse options, set distributed setting, set ramdom seed
     opt = parse_options(is_train=True)
@@ -134,35 +171,131 @@ def main():
     torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
 
-    # automatic resume ..
-    state_folder_path = 'experiments/{}/training_states/'.format(opt['name'])
     import os
-    try:
-        states = os.listdir(state_folder_path)
-    except:
-        states = []
 
-    resume_state = None
-    if len(states) > 0:
-        max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
-        resume_state = os.path.join(state_folder_path, max_state_file)
-        opt['path']['resume_state'] = resume_state
+    # ---------------------------------------------------------
+    # Directory setup
+    # ---------------------------------------------------------
+    if opt['use_directory_setup']:
 
-    # load resume states if necessary
-    if opt['path'].get('resume_state'):
-        device_id = torch.cuda.current_device()
-        resume_state = torch.load(
-            opt['path']['resume_state'],
-            map_location=lambda storage, loc: storage.cuda(device_id))
-    else:
+        # directory_setup.py expects:
+        # cfg.projectname
+        # cfg.model.model_type
+        #
+        # Restormer uses:
+        # opt['name']
+        # opt['model_type']
+        #
+        # So create the required fields without modifying
+                # directory_setup.py expects an OmegaConf DictConfig
+        # with projectname and model.model_type.
+        directory_cfg = OmegaConf.create({
+            'projectname': opt['name'],
+            'model': {
+                'model_type': opt['model_type']
+            }
+        })
+
+        # Create a new versioned experiment directory
+        workdir, rel_path = get_workdir(
+            directory_cfg,
+            root_dir='experiments',
+            use_max_version=False
+        )
+
+        # Update Restormer's paths to use the new directory
+        opt['path']['experiments_root'] = workdir
+        opt['path']['models'] = osp.join(workdir, 'models')
+        opt['path']['training_states'] = osp.join(
+            workdir, 'training_states')
+        opt['path']['log'] = workdir
+        opt['path']['visualization'] = osp.join(
+            workdir, 'visualization')
+
+        # This is a completely new experiment
         resume_state = None
 
+        # Store directory information in the config
+        opt['directory_setup'] = {}
+        opt['directory_setup']['workdir'] = workdir
+        opt['directory_setup']['relative_path'] = rel_path
+
+    else:
+
+        # -----------------------------------------------------
+        # Original Restormer automatic resume behavior
+        # -----------------------------------------------------
+        state_folder_path = 'experiments/{}/training_states/'.format(
+            opt['name'])
+
+        try:
+            states = os.listdir(state_folder_path)
+        except:
+            states = []
+
+        resume_state = None
+
+        if len(states) > 0:
+            max_state_file = '{}.state'.format(
+                max([int(x[0:-6]) for x in states])
+            )
+
+            resume_state = os.path.join(
+                state_folder_path,
+                max_state_file
+            )
+
+            opt['path']['resume_state'] = resume_state
+
+    # ---------------------------------------------------------
+    # Load resume state if necessary
+    # ---------------------------------------------------------
+    if resume_state is not None:
+        device_id = torch.cuda.current_device()
+        resume_state = torch.load(
+            resume_state,
+            map_location=lambda storage, loc: storage.cuda(device_id))
+        
+        
+
     # mkdir for experiments and logger
+    # if resume_state is None:
+    #     make_exp_dirs(opt)
+    #     if opt['logger'].get('use_tb_logger') and 'debug' not in opt[
+    #             'name'] and opt['rank'] == 0:
+    #         mkdir_and_rename(osp.join('tb_logger', opt['name']))
+    
+    
+        # ---------------------------------------------------------
+    # Create experiment directories
+    # ---------------------------------------------------------
     if resume_state is None:
-        make_exp_dirs(opt)
+
+        if opt['use_directory_setup']:
+            # get_workdir() has already created the main
+            # experiment directory.
+            #
+            # Create the directories required by Restormer.
+            os.makedirs(opt['path']['models'], exist_ok=True)
+            os.makedirs(
+                opt['path']['training_states'],
+                exist_ok=True
+            )
+            os.makedirs(opt['path']['visualization'], exist_ok=True)
+            os.makedirs(opt['path']['log'], exist_ok=True)
+
+        else:
+            # Keep the original Restormer behavior unchanged.
+            make_exp_dirs(opt)
+
         if opt['logger'].get('use_tb_logger') and 'debug' not in opt[
                 'name'] and opt['rank'] == 0:
-            mkdir_and_rename(osp.join('tb_logger', opt['name']))
+            mkdir_and_rename(
+                osp.join('tb_logger', opt['name'])
+            )
+            
+            
+
 
     # initialize loggers
     logger, tb_logger = init_loggers(opt)

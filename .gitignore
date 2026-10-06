@@ -1,10 +1,38 @@
+# Jupyter
 .ipynb_checkpoints/
+
+# Python
 *.pyc
-*.png
-*.tif
-*.jpg
+__pycache__/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+restormer_env/
+
+# Model/data files
 *.pth
 *.mat
 *.npy
-.DS_Store
 
+# Images
+*.png
+*.tif
+*.jpg
+
+# Experiment outputs
+experiments/
+
+# TensorBoard
+tb_logger/
+
+# Weights & Biases
+wandb/
+
+# Temporary files
+-opt
+
+# OS
+.DS_Store

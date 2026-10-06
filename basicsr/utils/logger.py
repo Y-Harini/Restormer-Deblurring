@@ -1,6 +1,8 @@
 import datetime
 import logging
 import time
+import os
+import git
 
 from .dist_util import get_dist_info, master_only
 
@@ -83,6 +85,17 @@ def init_tb_logger(log_dir):
     tb_logger = SummaryWriter(log_dir=log_dir)
     return tb_logger
 
+def add_git_info(opt):
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    repo = git.Repo(dir_path, search_parent_directories=True)
+
+    opt['git'] = {}
+    opt['git']['changedFiles'] = [
+        item.a_path for item in repo.index.diff(None)
+    ]
+    opt['git']['branch'] = repo.active_branch.name
+    opt['git']['untracked_files'] = repo.untracked_files
+    opt['git']['latest_commit'] = repo.head.object.hexsha
 
 @master_only
 def init_wandb_logger(opt):
@@ -100,6 +113,7 @@ def init_wandb_logger(opt):
         wandb_id = wandb.util.generate_id()
         resume = 'never'
 
+    add_git_info(opt)
     wandb.init(id=wandb_id, resume=resume, name=opt['name'], config=opt, project=project, sync_tensorboard=True)
 
     logger.info(f'Use wandb logger with id={wandb_id}; project={project}.')
