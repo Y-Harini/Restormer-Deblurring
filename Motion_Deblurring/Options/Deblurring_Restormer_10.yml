@@ -105,7 +105,8 @@ train:
     # restart_weights: [1,1]
     # eta_mins: [0.0003,0.000001]  
     type: CosineAnnealingRestartCyclicLR
-    periods: [16867, 38133]
+    # periods: [16867, 38133]
+    periods: [1687, 3813]
     restart_weights: [1,1]
     eta_mins: [0.0003, 0.000001] 
   
@@ -129,7 +130,7 @@ train:
 # validation settings
 val:
   window_size: 8
-  val_freq: !!float 4e3
+  val_freq: !!float 500
   save_img: false
   rgb2bgr: true
   use_image: true

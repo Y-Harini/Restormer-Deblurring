@@ -36,3 +36,23 @@ wandb/
 
 # OS
 .DS_Store
+
+# Ignore accidental command-line argument files
+--dataset
+--input_dir
+--result_dir
+--weights
+--yaml_file
+
+# Training logs
+logs/
+
+# Ignore accidental command-line argument files
+--dataset
+--input_dir
+--result_dir
+--weights
+--yaml_file
+
+# Training logs
+logs/

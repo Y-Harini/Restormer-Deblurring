@@ -13,6 +13,107 @@ import numpy as np
 import torch
 import cv2
 
+
+def random_affine_pair(
+    img_gt,
+    img_lq,
+    degrees=20,
+    translate=0.12,
+    scale_x_range=(0.75, 1.25),
+    scale_y_range=(0.75, 1.25)
+):
+    """Apply the same affine transformation to paired GT and LQ."""
+
+    h, w = img_gt.shape[:2]
+
+    # Random rotation
+    angle = random.uniform(-degrees, degrees)
+    theta = np.deg2rad(angle)
+
+    # Independent horizontal and vertical scaling
+    scale_x = random.uniform(*scale_x_range)
+    scale_y = random.uniform(*scale_y_range)
+
+    # Random translation
+    tx = random.uniform(-translate, translate) * w
+    ty = random.uniform(-translate, translate) * h
+
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+
+    cx, cy = w / 2, h / 2
+
+    # Rotation + anisotropic scaling
+    matrix = np.array([
+        [
+            scale_x * cos_t,
+            scale_x * sin_t,
+            (1 - scale_x * cos_t) * cx
+            - scale_x * sin_t * cy
+        ],
+        [
+            -scale_y * sin_t,
+            scale_y * cos_t,
+            scale_y * sin_t * cx
+            + (1 - scale_y * cos_t) * cy
+        ]
+    ], dtype=np.float32)
+
+    matrix[0, 2] += tx
+    matrix[1, 2] += ty
+
+    gt_aug = cv2.warpAffine(
+        img_gt, matrix, (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT_101
+    )
+
+    lq_aug = cv2.warpAffine(
+        img_lq, matrix, (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT_101
+    )
+
+    return gt_aug, lq_aug
+
+def random_gaussian_blur(img_lq, prob=0.5):
+    """Apply stronger Gaussian blur to LQ only."""
+
+    if random.random() >= prob:
+        return img_lq
+
+    kernel_size = random.choice([13, 15, 17])
+    sigma = random.uniform(3.0, 6.0)
+
+    return cv2.GaussianBlur(
+        img_lq,
+        (kernel_size, kernel_size),
+        sigmaX=sigma
+    )
+    
+def random_gaussian_noise(img_lq, prob=0.5, sigma_range=(20, 30)):
+    """Apply heavy Gaussian noise to LQ images only."""
+
+    if random.random() >= prob:
+        return img_lq
+
+    # Random noise standard deviation (pixel intensity scale: 0-255)
+    sigma = random.uniform(*sigma_range)
+
+    # Convert sigma to normalized image scale (0-1)
+    noise = np.random.normal(
+        0,
+        sigma / 255.0,
+        img_lq.shape
+    ).astype(np.float32)
+
+    noisy_img = img_lq + noise
+
+    # Keep pixel values within valid image range
+    noisy_img = np.clip(noisy_img, 0.0, 1.0)
+
+    return noisy_img
+
 class Dataset_PairedImage(data.Dataset):
     """Paired image dataset for image restoration.
 
@@ -72,8 +173,25 @@ class Dataset_PairedImage(data.Dataset):
                 [self.lq_folder, self.gt_folder], ['lq', 'gt'],
                 self.filename_tmpl)
 
+        # if self.opt['phase'] == 'train':
+        #     self.geometric_augs = opt['geometric_augs']
+        
         if self.opt['phase'] == 'train':
             self.geometric_augs = opt['geometric_augs']
+            self.affine_augs = opt.get('affine_augs', False)
+            self.affine_degrees = opt.get('affine_degrees', 35)
+            self.affine_translate = opt.get('affine_translate', 0.18)
+            self.affine_scale_x_min = opt.get('affine_scale_x_min', 0.70)
+            self.affine_scale_x_max = opt.get('affine_scale_x_max', 1.30)
+            self.affine_scale_y_min = opt.get('affine_scale_y_min', 0.80)
+            self.affine_scale_y_max = opt.get('affine_scale_y_max', 1.20)
+            self.gaussian_blur_aug = opt.get('gaussian_blur_aug', False)
+            self.gaussian_blur_prob = opt.get('gaussian_blur_prob', 0.5)
+            self.gaussian_noise_aug = opt.get('gaussian_noise_aug', False)
+            self.gaussian_noise_prob = opt.get('gaussian_noise_prob', 0.5)
+            self.gaussian_noise_sigma_min = opt.get('gaussian_noise_sigma_min', 20)
+            self.gaussian_noise_sigma_max = opt.get('gaussian_noise_sigma_max', 30)
+            
 
     def __getitem__(self, index):
         if self.file_client is None:
@@ -111,7 +229,40 @@ class Dataset_PairedImage(data.Dataset):
             # flip, rotation augmentations
             if self.geometric_augs:
                 img_gt, img_lq = random_augmentation(img_gt, img_lq)
+                
+            # Additional augmentations for Model E
+            if self.affine_augs:
+                img_gt, img_lq = random_affine_pair(
+                    img_gt,
+                    img_lq,
+                    degrees=self.affine_degrees,
+                    translate=self.affine_translate,
+                    scale_x_range=(
+                        self.affine_scale_x_min,
+                        self.affine_scale_x_max
+                    ),
+                    scale_y_range=(
+                        self.affine_scale_y_min,
+                        self.affine_scale_y_max
+                    )
+                )
+
+            if self.gaussian_blur_aug:
+                img_lq = random_gaussian_blur(
+                    img_lq,
+                    prob=self.gaussian_blur_prob
+                )
             
+            if self.gaussian_noise_aug:
+                img_lq = random_gaussian_noise(
+                    img_lq,
+                    prob=self.gaussian_noise_prob,
+                    sigma_range=(
+                        self.gaussian_noise_sigma_min,
+                        self.gaussian_noise_sigma_max
+                    )
+                )
+                
         # BGR to RGB, HWC to CHW, numpy to tensor
         img_gt, img_lq = img2tensor([img_gt, img_lq],
                                     bgr2rgb=True,
@@ -295,7 +446,7 @@ class Dataset_DefocusDeblur_DualPixel_16bit(data.Dataset):
 
         if self.opt['phase'] == 'train':
             self.geometric_augs = self.opt['geometric_augs']
-
+            
     def __getitem__(self, index):
         if self.file_client is None:
             self.file_client = FileClient(

@@ -150,8 +150,8 @@ logger:
   #   project: ~
   #   resume_id: ~
   wandb:
-  project: Restormer-Deblurring
-  resume_id: ~
+    project: Restormer-Deblurring
+    resume_id: ~
 
 # dist training settings
 dist_params:

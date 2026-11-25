@@ -382,7 +382,13 @@ def main():
             mini_batch_size = mini_batch_sizes[bs_j]
             
             if logger_j[bs_j]:
-                logger.info('\n Updating Patch_Size to {} and Batch_Size to {} \n'.format(mini_gt_size, mini_batch_size*torch.cuda.device_count())) 
+                # logger.info('\n Updating Patch_Size to {} and Batch_Size to {} \n'.format(mini_gt_size, mini_batch_size*torch.cuda.device_count())) 
+                logger.info(
+                    '\n Updating Patch_Size to {} and Batch_Size per GPU to {} \n'.format(
+                        mini_gt_size,
+                        mini_batch_size
+                    )
+                )
                 logger_j[bs_j] = False
 
             lq = train_data['lq']

@@ -1,5 +1,5 @@
 # general settings
-name: Deblurring_Restormer_C_25
+name: Deblurring_Restormer_E3_Affine_Gaussian_10
 model_type: ImageCleanModel
 scale: 1
 # num_gpu: 8  # set num_gpu: 0 for cpu mode
@@ -15,11 +15,36 @@ datasets:
     # dataroot_gt: ./Motion_Deblurring/Datasets/train/GoPro/target_crops
     # dataroot_lq: ./Motion_Deblurring/Datasets/train/GoPro/input_crops
 
-    dataroot_gt: /data/ai23btech11029/Restormer/datasets/modelB_GoPro_25/target_crops
-    dataroot_lq: /data/ai23btech11029/Restormer/datasets/modelB_GoPro_25/input_crops
+    dataroot_gt: /data/ai23btech11029/Restormer/datasets/modelB_GoPro_10/target_crops
+    dataroot_lq: /data/ai23btech11029/Restormer/datasets/modelB_GoPro_10/input_crops
 
-    geometric_augs: true
-    # geometric_augs: false
+    geometric_augs: false
+
+    affine_augs: true
+
+    # Rotation
+    affine_degrees: 35
+
+    # Independent X and Y translation
+    affine_translate: 0.30
+
+    # Independent X-axis scaling
+    affine_scale_x_min: 0.60
+    affine_scale_x_max: 1.40
+
+    # Independent Y-axis scaling
+    affine_scale_y_min: 0.60
+    affine_scale_y_max: 1.40
+
+    # Gaussian blur
+    gaussian_blur_aug: true
+    gaussian_blur_prob: 1.0
+ 
+    # Gaussian noise
+    gaussian_noise_aug: true
+    gaussian_noise_prob: 1.0
+    gaussian_noise_sigma_min: 20
+    gaussian_noise_sigma_max: 30
 
     filename_tmpl: '{}'
     io_backend:
@@ -41,7 +66,7 @@ datasets:
     # gt_sizes: [128,160,192,256,320]  # Patch sizes for progressive training.
 
     mini_batch_sizes: [6, 4, 2, 1, 1]
-    iters: [4584, 3189, 2392, 1794, 1791] 
+    iters: [1834, 1276, 957, 717, 716] 
     gt_size: 320  # Max patch size for progressive training
     gt_sizes: [128,160,192,256,320] # Patch sizes for progressive training.
     ### ------------------------------------------------------------
@@ -91,7 +116,7 @@ path:
 
 # training settings
 train:
-  total_iter: 13750
+  total_iter: 5500
   # total_iter : 10
   warmup_iter: -1 # no warm up
   use_grad_clip: true
@@ -105,7 +130,8 @@ train:
     # restart_weights: [1,1]
     # eta_mins: [0.0003,0.000001]  
     type: CosineAnnealingRestartCyclicLR
-    periods: [16867, 38133]
+    # periods: [16867, 38133]
+    periods: [1687, 3813]
     restart_weights: [1,1]
     eta_mins: [0.0003, 0.000001] 
   
@@ -129,7 +155,7 @@ train:
 # validation settings
 val:
   window_size: 8
-  val_freq: !!float 4e3
+  val_freq: !!float 500
   save_img: false
   rgb2bgr: true
   use_image: true
@@ -147,7 +173,7 @@ logger:
   save_checkpoint_freq: !!float 4e3
   use_tb_logger: true
   wandb:
-    project: Restormer-Deblurring
+    project: ~
     resume_id: ~
 
 # dist training settings

@@ -1,3 +1,4 @@
+
 import os
 import csv
 import numpy as np
@@ -13,13 +14,13 @@ TARGET_DIR = "/data/DATASETS/GoPro/test/GoPro/target"
 
 RESTORED_DIR = (
     "/data/ai23btech11029/Restormer/"
-    "experiments/Deblurring_Restormer_C_10/"
+    "experiments/Deblurring_Restormer_E3_Affine_Gaussian_10/"
     "visualization/restored/GoPro"
 )
 
 OUTPUT_DIR = (
     "/data/ai23btech11029/Restormer/"
-    "experiments/Deblurring_Restormer_C_10/"
+    "experiments/Deblurring_Restormer_E3_Affine_Gaussian_10/"
     "visualization"
 )
 
@@ -30,6 +31,21 @@ SUMMARY_FILE = os.path.join(OUTPUT_DIR, "summary.txt")
 os.makedirs(COMPARISON_DIR, exist_ok=True)
 
 
+# Verify that the expected test images are present
+print(f"Test input directory: {INPUT_DIR}")
+print(f"Restored directory: {RESTORED_DIR}")
+print(f"Target directory: {TARGET_DIR}")
+
+# ============================================================
+# Validate directories
+# ============================================================
+
+for directory in [INPUT_DIR, TARGET_DIR, RESTORED_DIR]:
+    if not os.path.isdir(directory):
+        raise FileNotFoundError(
+            f"Directory not found: {directory}"
+        )
+
 # ============================================================
 # Helper functions
 # ============================================================
@@ -37,29 +53,30 @@ os.makedirs(COMPARISON_DIR, exist_ok=True)
 def load_image(path):
     """Load RGB image and convert to float [0, 1]."""
     img = Image.open(path).convert("RGB")
-    img = np.asarray(img).astype(np.float32) / 255.0
-    return img
+    return np.asarray(img).astype(np.float32) / 255.0
 
 
 def create_comparison(input_img, restored_img, target_img, output_path):
     """
     Create:
     Blurred Input | Restormer Output | Ground Truth
+
+    No resizing is performed.
     """
 
     input_pil = Image.open(input_img).convert("RGB")
     restored_pil = Image.open(restored_img).convert("RGB")
     target_pil = Image.open(target_img).convert("RGB")
 
-    # Make sure all three have the same dimensions
+    if not (
+        input_pil.size == restored_pil.size == target_pil.size
+    ):
+        raise ValueError(
+            f"Image dimension mismatch while creating comparison: "
+            f"{output_path}"
+        )
+
     width, height = input_pil.size
-
-    if restored_pil.size != (width, height):
-        restored_pil = restored_pil.resize((width, height))
-
-    if target_pil.size != (width, height):
-        target_pil = target_pil.resize((width, height))
-
     label_height = 45
 
     comparison = Image.new(
@@ -75,8 +92,10 @@ def create_comparison(input_img, restored_img, target_img, output_path):
     draw = ImageDraw.Draw(comparison)
 
     draw.text((width // 2 - 50, 12), "Blurred Input", fill="black")
-    draw.text((width + width // 2 - 60, 12), "Restormer Output", fill="black")
-    draw.text((2 * width + width // 2 - 50, 12), "Ground Truth", fill="black")
+    draw.text((width + width // 2 - 60, 12),
+              "Restormer E3 Affine_Gaussian Output", fill="black")
+    draw.text((2 * width + width // 2 - 50, 12),
+              "Ground Truth", fill="black")
 
     comparison.save(output_path)
 
@@ -85,16 +104,17 @@ def create_comparison(input_img, restored_img, target_img, output_path):
 # Find test images
 # ============================================================
 
+valid_extensions = (".png", ".jpg", ".jpeg")
+
 files = sorted(
     f for f in os.listdir(INPUT_DIR)
-    if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    if f.lower().endswith(valid_extensions)
 )
 
 print("=" * 60)
-print("Restormer Evaluation")
+print("Restormer E3 Affine_Gaussian Evaluation")
 print("=" * 60)
-print(f"Number of input images: {len(files)}")
-print()
+print(f"Number of test input images: {len(files)}")
 
 if len(files) == 0:
     raise RuntimeError("No test input images found.")
@@ -104,10 +124,10 @@ if len(files) == 0:
 # ============================================================
 
 results = []
-
 total_psnr = 0.0
 total_ssim = 0.0
 processed = 0
+skipped = 0
 
 for i, filename in enumerate(files, start=1):
 
@@ -115,24 +135,31 @@ for i, filename in enumerate(files, start=1):
     target_path = os.path.join(TARGET_DIR, filename)
     restored_path = os.path.join(RESTORED_DIR, filename)
 
-    if not os.path.exists(target_path):
+    if not os.path.isfile(target_path):
         print(f"[WARNING] Missing target: {filename}")
+        skipped += 1
         continue
 
-    if not os.path.exists(restored_path):
+    if not os.path.isfile(restored_path):
         print(f"[WARNING] Missing restored image: {filename}")
+        skipped += 1
         continue
 
-    # Load images
+    input_img = load_image(input_path)
     restored = load_image(restored_path)
     target = load_image(target_path)
 
-    # Make sure dimensions match
-    if restored.shape != target.shape:
+    # Verify all three images have identical dimensions
+    if not (
+        input_img.shape == restored.shape == target.shape
+    ):
         print(
             f"[WARNING] Shape mismatch: {filename} "
-            f"Restored={restored.shape}, Target={target.shape}"
+            f"Input={input_img.shape}, "
+            f"Restored={restored.shape}, "
+            f"Target={target.shape}"
         )
+        skipped += 1
         continue
 
     # PSNR
@@ -156,7 +183,7 @@ for i, filename in enumerate(files, start=1):
     total_ssim += ssim
     processed += 1
 
-    # Create comparison image
+    # Create test comparison image
     comparison_path = os.path.join(
         COMPARISON_DIR,
         filename
@@ -172,10 +199,9 @@ for i, filename in enumerate(files, start=1):
     if i % 50 == 0 or i == len(files):
         print(
             f"Processed {i}/{len(files)} "
-            f"| PSNR: {psnr:.4f} "
-            f"| SSIM: {ssim:.4f}"
+            f"| Current PSNR: {psnr:.4f} "
+            f"| Current SSIM: {ssim:.4f}"
         )
-
 
 # ============================================================
 # Average metrics
@@ -187,7 +213,6 @@ if processed == 0:
 average_psnr = total_psnr / processed
 average_ssim = total_ssim / processed
 
-
 # ============================================================
 # Save metrics.csv
 # ============================================================
@@ -195,11 +220,7 @@ average_ssim = total_ssim / processed
 with open(METRICS_FILE, "w", newline="") as f:
     writer = csv.writer(f)
 
-    writer.writerow([
-        "filename",
-        "PSNR",
-        "SSIM"
-    ])
+    writer.writerow(["filename", "PSNR", "SSIM"])
 
     for filename, psnr, ssim in results:
         writer.writerow([
@@ -208,21 +229,20 @@ with open(METRICS_FILE, "w", newline="") as f:
             f"{ssim:.6f}"
         ])
 
-
 # ============================================================
 # Save summary.txt
 # ============================================================
 
 with open(SUMMARY_FILE, "w") as f:
-    f.write("Restormer GoPro Test Results\n")
+    f.write("Restormer E3 Affine_Gaussian GoPro Test Results\n")
     f.write("=" * 40 + "\n\n")
 
     f.write(f"Number of input images: {len(files)}\n")
-    f.write(f"Number successfully evaluated: {processed}\n\n")
+    f.write(f"Number successfully evaluated: {processed}\n")
+    f.write(f"Number skipped: {skipped}\n\n")
 
     f.write(f"Average PSNR: {average_psnr:.6f} dB\n")
     f.write(f"Average SSIM: {average_ssim:.6f}\n")
-
 
 # ============================================================
 # Final output
@@ -230,13 +250,15 @@ with open(SUMMARY_FILE, "w") as f:
 
 print()
 print("=" * 60)
-print("Evaluation Complete")
+print("E3 Affine_Gaussian Evaluation Complete")
 print("=" * 60)
-print(f"Images evaluated : {processed}")
-print(f"Average PSNR     : {average_psnr:.6f} dB")
-print(f"Average SSIM     : {average_ssim:.6f}")
+print(f"Input images      : {len(files)}")
+print(f"Images evaluated  : {processed}")
+print(f"Images skipped    : {skipped}")
+print(f"Average PSNR      : {average_psnr:.6f} dB")
+print(f"Average SSIM      : {average_ssim:.6f}")
 print()
-print(f"Metrics          : {METRICS_FILE}")
-print(f"Summary          : {SUMMARY_FILE}")
-print(f"Comparisons      : {COMPARISON_DIR}")
+print(f"Metrics           : {METRICS_FILE}")
+print(f"Summary            : {SUMMARY_FILE}")
+print(f"Comparisons        : {COMPARISON_DIR}")
 print("=" * 60)
